@@ -1,8 +1,10 @@
 //jshint esversion:6
+require("dotenv").config(); //should be put top 1st
 const express = require("express");
 const ejs = require("ejs");
 const bodyParser = require("body-parser");
 const mongoose = require("mongoose");
+const encrypt = require("mongoose-encryption");
 const app = express();
 const uri = "mongodb://127.0.0.1:27017/userDB";
 app.use(express.static("public"));
@@ -18,7 +20,7 @@ mongoose
     console.log(err);
   });
 
-const userSchema = mongoose.Schema({
+const userSchema = new mongoose.Schema({
   email: {
     type: String,
     required: true,
@@ -28,6 +30,9 @@ const userSchema = mongoose.Schema({
     required: true,
   },
 });
+
+
+userSchema.plugin(encrypt, {secret: process.env.SECRET, encryptedFields: ["password"]});
 
 const userCollection = mongoose.model("User", userSchema);
 
