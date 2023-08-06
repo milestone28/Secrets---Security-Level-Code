@@ -4,7 +4,8 @@ const express = require("express");
 const ejs = require("ejs");
 const bodyParser = require("body-parser");
 const mongoose = require("mongoose");
-const encrypt = require("mongoose-encryption");
+//const md5 = require("md5"); //obsolete can easily hack this if for the level 3
+const SHA256 = require("crypto-js/sha256"); // its a popular packages for extra security for level 3
 const app = express();
 const uri = "mongodb://127.0.0.1:27017/userDB";
 app.use(express.static("public"));
@@ -32,7 +33,6 @@ const userSchema = new mongoose.Schema({
 });
 
 
-userSchema.plugin(encrypt, {secret: process.env.SECRET, encryptedFields: ["password"]});
 
 const userCollection = mongoose.model("User", userSchema);
 
@@ -47,7 +47,7 @@ app
   })
   .post(async function (req, res) {
     const _username = req.body.username;
-    const _password = req.body.password;
+    const _password = SHA256(req.body.password).toString();
 
     await userCollection.findOne({email : _username})
     .then((result) => {
@@ -74,7 +74,7 @@ app
 
     const user = new userCollection({
       email: _username,
-      password: _password,
+      password: SHA256(_password).toString()
     });
     await user
       .save()
