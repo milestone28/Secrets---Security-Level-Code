@@ -25,6 +25,9 @@ app.use(express.static("public"));
 app.set("view engine", "ejs");
 app.use(bodyParser.urlencoded({ extended: true }));
 
+var userLocal = [];
+
+
 //Initialize Middleware
 app.use(
   session({
@@ -51,7 +54,8 @@ const userSchema = new mongoose.Schema({
   accountId: String,
   provider: String,
   name: String,
-  username: String
+  username: String,
+  secret : Array
 });
 
 userSchema.plugin(passportLocalMongoose);
@@ -60,15 +64,16 @@ userSchema.plugin(findOrCreate);
 const userCollection = mongoose.model("User", userSchema);
 
 passport.use(userCollection.createStrategy());
+console.log(userCollection);
 // passport.serializeUser(userCollection.serializeUser());
 // passport.deserializeUser(userCollection.deserializeUser());
+
+
 passport.serializeUser(function (user, cb) {
+  if(user._id)
+    userLocal.push(user._id);
   process.nextTick(function () {
-    return cb(null, {
-      id: user.id,
-      //   username: user.username,
-      //   picture: user.picture,
-    });
+    return cb(null, user);
   });
 });
 
@@ -88,7 +93,6 @@ passport.use(
       scope: ["email", "profile"],
     },
     async function (accessToken, refreshToken, profile, cb) {
-        console.log(profile);
         const user = await userCollection.findOne({
           accountId: profile.id,
           provider: profile.provider
@@ -109,7 +113,7 @@ passport.use(
         }
       }
     //  function (accessToken, refreshToken, profile, cb) {
-    //   console.log(profile);
+     // console.log(profile);
     //   userCollection.findOrCreate(
     //     { googleId: profile.id },
     //     function (err, user) {
@@ -128,14 +132,14 @@ passport.use(
       callbackURL: "http://localhost:3000/auth/facebook/secrets",
     },
     // function(accessToken, refreshToken, profile, cb) {
-    //     console.log(profile);
+      //  console.log(profile);
     //     userCollection.findOrCreate({ facebookId: profile.id }, function (err, user) {
     //     return cb(err, user);
     //   });
     // }
 
     async function (accessToken, refreshToken, profile, cb) {
-      console.log(profile);
+    //   console.log(profile);
       const user = await userCollection.findOne({
         accountId: profile.id,
         provider: profile.provider
@@ -263,19 +267,14 @@ app
     // }
   });
 
-app.get("/secrets", (req, res) => {
-  // The below line was added so we can't display the "/secrets" page
-  // after we logged out using the "back" button of the browser, which
-  // would normally display the browser cache and thus expose the
-  // "/secrets" page we want to protect. Code taken from this post.
-  res.set(
-    "Cache-Control",
-    "no-cache, private, no-store, must-revalidate, max-stal e=0, post-check=0, pre-check=0"
-  );
-  if (req.isAuthenticated()) {
-    res.render("secrets");
-  } else {
-    res.redirect("/login");
+app.get("/secrets", async (req, res) => {
+  try {
+    await userCollection.find({secret:{$ne:null}})
+    .then((_secret)=>{
+      res.render("secrets",{usersWithSecrets:_secret});
+    }).catch((err)=>{console.log(err)});
+  } catch (error) {
+    console.log(error);
   }
 });
 
@@ -285,9 +284,93 @@ app.get("/logout", function (req, res) {
       console.log(err);
     } else {
       res.redirect("/");
+      userLocal = [];
     }
   });
 });
+
+
+app.get("/submit", async (req, res) => {
+    // The below line was added so we can't display the "/secrets" page
+    // after we logged out using the "back" button of the browser, which
+    // would normally display the browser cache and thus expose the
+    // "/secrets" page we want to protect. Code taken from this post.
+    res.set(
+      "Cache-Control",
+      "no-cache, private, no-store, must-revalidate, max-stal e=0, post-check=0, pre-check=0"
+    );
+    if (req.isAuthenticated()) {
+
+      if(userLocal.length !== 0){//this is for the local register
+        try {
+         const foundUser = await userCollection.findById(userLocal[0]); 
+          if(foundUser)
+           res.render("submit",{userSecrets:foundUser.secret});
+        } catch (error) {
+          console.log(error);
+        };
+      } else { //this is for the OAoth (google, facebook, github , etc)
+        try {
+          const foundUser = await userCollection.findOne({accountId:req.user.id}); 
+          if(foundUser)
+          res.render("submit",{userSecrets:foundUser.secret});
+         } catch (error) {
+           console.log(error);
+         }
+      }
+    } else {
+      res.redirect("/login");
+    }
+  });
+
+  app.post("/submit/delete",async (req, res) =>{
+    if(req.isAuthenticated()){
+      if(userLocal.length !== 0){//this is for the local register
+        try {
+         const foundUser = await userCollection.findById(userLocal[0]); 
+          if(foundUser)
+          foundUser.secret.splice(foundUser.secret.indexOf(req.body.secret),1);
+          foundUser.save().then(()=>{res.redirect("/submit")}).catch((err)=>{console.log(err)});
+        } catch (error) {
+          console.log(error);
+        };
+      } else { //this is for the OAoth (google, facebook, github , etc)
+        try {
+          const foundUser = await userCollection.findOne({accountId:req.user.id}); 
+          if(foundUser)
+          foundUser.secret.splice(foundUser.secret.indexOf(req.body.secret),1);
+          foundUser.save().then(()=>{res.redirect("/submit")}).catch((err)=>{console.log(err)});
+         } catch (error) {
+           console.log(error);
+         }
+      }
+    }else {
+      res.redirect("/login");
+    }
+  });
+
+  app.post("/submit", async (req, res) => {
+    const submittedSecret = req.body.secret;
+    if(userLocal.length !== 0){//this is for the local register
+      try {
+       const foundUser = await userCollection.findById(userLocal[0]); 
+        if(foundUser)
+          foundUser.secret.push(submittedSecret);
+          foundUser.save().then(()=>{res.redirect("/secrets")}).catch((err)=>{console.log(`Unable to save secret.. : ${err}`)});
+      } catch (error) {
+        console.log(error);
+      };
+    } else { //this is for the OAoth (google, facebook, github , etc)
+      try {
+        const foundUser = await userCollection.findOne({accountId:req.user.id}); 
+         if(foundUser)
+           foundUser.secret.push(submittedSecret);
+           foundUser.save().then(()=>{res.redirect("/secrets")}).catch((err)=>{console.log(`Unable to save secret.. : ${err}`)})
+       } catch (error) {
+         console.log(error);
+       }
+    }
+  });
 
 app.listen(process.env.PORT || 3000, function () {
   console.log("Server started...");
